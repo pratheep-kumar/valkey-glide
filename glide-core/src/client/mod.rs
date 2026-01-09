@@ -524,8 +524,8 @@ impl Client {
     /// Returns (username, password) tuple where username is None for password-only auth.
     ///
     /// AUTH command formats:
-    /// - AUTH password (args: [password])
-    /// - AUTH username password (args: [username, password])
+    /// - AUTH password (args: \[password\])
+    /// - AUTH username password (args: \[username, password\])
     fn extract_auth_info(&self, cmd: &Cmd) -> (Option<String>, Option<String>) {
         // Get the first argument
         let first_arg = cmd
