@@ -528,14 +528,14 @@ impl Client {
     /// - AUTH username password (args: [username, password])
     fn extract_auth_info(&self, cmd: &Cmd) -> (Option<String>, Option<String>) {
         // Get the first argument
-        let first_arg = cmd.arg_idx(1).and_then(|bytes| {
-            std::str::from_utf8(bytes).ok().map(|s| s.to_string())
-        });
+        let first_arg = cmd
+            .arg_idx(1)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok().map(|s| s.to_string()));
 
         // Get the second argument
-        let second_arg = cmd.arg_idx(2).and_then(|bytes| {
-            std::str::from_utf8(bytes).ok().map(|s| s.to_string())
-        });
+        let second_arg = cmd
+            .arg_idx(2)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok().map(|s| s.to_string()));
 
         match (first_arg, second_arg) {
             // AUTH username password
@@ -615,15 +615,21 @@ impl Client {
     /// - HELLO 3 AUTH username password
     /// - HELLO 3 SETNAME clientname
     /// - HELLO 3 AUTH username password SETNAME clientname
-    fn extract_hello_info(&self, cmd: &Cmd) -> (Option<redis::ProtocolVersion>, Option<String>, Option<String>, Option<String>) {
+    fn extract_hello_info(
+        &self,
+        cmd: &Cmd,
+    ) -> (
+        Option<redis::ProtocolVersion>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         // Get protocol version (first argument)
         let protocol = cmd.arg_idx(1).and_then(|bytes| {
-            std::str::from_utf8(bytes).ok().and_then(|s| {
-                match s {
-                    "2" => Some(redis::ProtocolVersion::RESP2),
-                    "3" => Some(redis::ProtocolVersion::RESP3),
-                    _ => None,
-                }
+            std::str::from_utf8(bytes).ok().and_then(|s| match s {
+                "2" => Some(redis::ProtocolVersion::RESP2),
+                "3" => Some(redis::ProtocolVersion::RESP3),
+                _ => None,
             })
         });
 
@@ -2289,7 +2295,11 @@ mod tests {
 
         // Test HELLO with AUTH
         let mut cmd = Cmd::new();
-        cmd.arg("HELLO").arg("3").arg("AUTH").arg("user").arg("pass");
+        cmd.arg("HELLO")
+            .arg("3")
+            .arg("AUTH")
+            .arg("user")
+            .arg("pass");
         assert!(client.is_hello_command(&cmd));
 
         // Test non-HELLO command
@@ -2322,7 +2332,11 @@ mod tests {
 
         // Test HELLO 3 AUTH username password
         let mut cmd = Cmd::new();
-        cmd.arg("HELLO").arg("3").arg("AUTH").arg("myuser").arg("mypass");
+        cmd.arg("HELLO")
+            .arg("3")
+            .arg("AUTH")
+            .arg("myuser")
+            .arg("mypass");
         let (protocol, username, password, client_name) = client.extract_hello_info(&cmd);
         assert_eq!(protocol, Some(redis::ProtocolVersion::RESP3));
         assert_eq!(username, Some("myuser".to_string()));
@@ -2340,7 +2354,13 @@ mod tests {
 
         // Test HELLO 3 AUTH user pass SETNAME myclient
         let mut cmd = Cmd::new();
-        cmd.arg("HELLO").arg("3").arg("AUTH").arg("myuser").arg("mypass").arg("SETNAME").arg("myclient");
+        cmd.arg("HELLO")
+            .arg("3")
+            .arg("AUTH")
+            .arg("myuser")
+            .arg("mypass")
+            .arg("SETNAME")
+            .arg("myclient");
         let (protocol, username, password, client_name) = client.extract_hello_info(&cmd);
         assert_eq!(protocol, Some(redis::ProtocolVersion::RESP3));
         assert_eq!(username, Some("myuser".to_string()));
