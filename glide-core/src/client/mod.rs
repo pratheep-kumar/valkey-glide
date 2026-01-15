@@ -903,6 +903,7 @@ impl Client {
                 // Only handle HELLO commands if they executed successfully (no error)
                 if self.is_hello_command(cmd) {
                     self.handle_hello_command(cmd).await?;
+                }
                 Ok(value)
             })
             .await?;
