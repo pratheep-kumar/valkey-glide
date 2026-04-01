@@ -81,7 +81,7 @@ fn null_pubsub_callback() -> PubSubCallback {
 #[test]
 fn test_create_client_from_uri_simple() {
     let server = Server::new();
-    let uri = CString::new(format!("redis://127.0.0.1:{}", server.port)).unwrap();
+    let uri = CString::new(format!("valkey://127.0.0.1:{}", server.port)).unwrap();
 
     let client_type = Box::into_raw(Box::new(ClientType::SyncClient));
 
@@ -109,6 +109,107 @@ fn test_create_client_from_uri_simple() {
         }
     } else {
         // Connection failed - print error for debugging
+        let error = parse_error_msg(conn_response.connection_error_message);
+        panic!("Failed to create client: {}", error);
+    }
+}
+
+#[test]
+fn test_create_client_from_uri_redis_scheme_compat() {
+    let server = Server::new();
+    let uri = CString::new(format!("redis://127.0.0.1:{}", server.port)).unwrap();
+
+    let client_type = Box::into_raw(Box::new(ClientType::SyncClient));
+
+    let response = unsafe {
+        create_client_from_uri(
+            uri.as_ptr(),
+            ptr::null(),
+            client_type,
+            null_pubsub_callback(),
+        )
+    };
+
+    assert!(!response.is_null());
+    let conn_response = unsafe { &*response };
+
+    if conn_response.connection_error_message.is_null() {
+        assert!(!conn_response.conn_ptr.is_null());
+
+        unsafe {
+            close_client(conn_response.conn_ptr);
+            free_connection_response(response as *mut ConnectionResponse);
+            drop(Box::from_raw(client_type));
+        }
+    } else {
+        let error = parse_error_msg(conn_response.connection_error_message);
+        panic!("Failed to create client: {}", error);
+    }
+}
+
+#[test]
+fn test_create_client_from_uri_with_refresh_topology_from_initial_nodes() {
+    let server = Server::new();
+    let uri = CString::new(format!("valkey://127.0.0.1:{}", server.port)).unwrap();
+    let options = CString::new(r#"{"refresh_topology_from_initial_nodes": true}"#).unwrap();
+
+    let client_type = Box::into_raw(Box::new(ClientType::SyncClient));
+
+    let response = unsafe {
+        create_client_from_uri(
+            uri.as_ptr(),
+            options.as_ptr(),
+            client_type,
+            null_pubsub_callback(),
+        )
+    };
+
+    assert!(!response.is_null());
+    let conn_response = unsafe { &*response };
+
+    if conn_response.connection_error_message.is_null() {
+        assert!(!conn_response.conn_ptr.is_null());
+
+        unsafe {
+            close_client(conn_response.conn_ptr);
+            free_connection_response(response as *mut ConnectionResponse);
+            drop(Box::from_raw(client_type));
+        }
+    } else {
+        let error = parse_error_msg(conn_response.connection_error_message);
+        panic!("Failed to create client: {}", error);
+    }
+}
+
+#[test]
+fn test_create_client_from_uri_with_read_only() {
+    let server = Server::new();
+    let uri = CString::new(format!("valkey://127.0.0.1:{}", server.port)).unwrap();
+    let options = CString::new(r#"{"read_only": true}"#).unwrap();
+
+    let client_type = Box::into_raw(Box::new(ClientType::SyncClient));
+
+    let response = unsafe {
+        create_client_from_uri(
+            uri.as_ptr(),
+            options.as_ptr(),
+            client_type,
+            null_pubsub_callback(),
+        )
+    };
+
+    assert!(!response.is_null());
+    let conn_response = unsafe { &*response };
+
+    if conn_response.connection_error_message.is_null() {
+        assert!(!conn_response.conn_ptr.is_null());
+
+        unsafe {
+            close_client(conn_response.conn_ptr);
+            free_connection_response(response as *mut ConnectionResponse);
+            drop(Box::from_raw(client_type));
+        }
+    } else {
         let error = parse_error_msg(conn_response.connection_error_message);
         panic!("Failed to create client: {}", error);
     }
@@ -427,7 +528,7 @@ fn test_create_client_from_uri_invalid_uri() {
     assert!(conn_response.conn_ptr.is_null());
 
     let error = parse_error_msg(conn_response.connection_error_message);
-    assert!(error.contains("Invalid Redis URI") || error.contains("URI"));
+    assert!(error.contains("Invalid connection URI") || error.contains("URI"));
 
     unsafe {
         free_connection_response(response as *mut ConnectionResponse);
@@ -602,6 +703,9 @@ fn test_create_client_from_uri_wrong_type_in_json() {
 }
 
 #[rstest]
+#[case("valkey://127.0.0.1")]
+#[case("valkey://localhost:6379")]
+#[case("valkeys://example.com:6380")]
 #[case("redis://127.0.0.1")]
 #[case("redis://localhost")]
 #[case("redis://example.com:6380")]

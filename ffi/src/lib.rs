@@ -25,6 +25,7 @@ use redis::cluster_routing::{
 };
 use redis::{ClusterScanArgs, RedisError};
 use redis::{Cmd, Pipeline, PipelineRetryStrategy, RedisResult, Value};
+use std::borrow::Cow;
 use std::ffi::CStr;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -874,18 +875,19 @@ pub unsafe extern "C-unwind" fn create_client(
 
 /// Creates a new client from a URI string and optional JSON configuration.
 ///
-/// This is an alternative to [`create_client`] that accepts a Redis/Valkey URI instead of protobuf bytes.
+/// This is an alternative to [`create_client`] that accepts a connection URI instead of protobuf bytes.
 /// The URI parsing and configuration building happens in Rust, making it easier to add new connection
 /// options without changing FFI signatures across all language bindings.
 ///
 /// # Parameters
 ///
-/// * `uri_str`: A null-terminated C string containing the Redis/Valkey connection URI.
-///   Format: `redis://[username:password@]host[:port][/database]` or `rediss://...` for TLS.
+/// * `uri_str`: A null-terminated C string containing the connection URI.
+///   Preferred format: `valkey://` (or `valkey+unix://` for Unix sockets) and `valkeys://` for TLS. `redis://`, `redis+unix://`, and `rediss://` are accepted for compatibility.
 ///   Examples:
-///   - `redis://localhost:6379`
-///   - `rediss://:password@example.com:6380/0`
-///   - `redis://user:pass@localhost:6379/1`
+///   - `valkey://localhost:6379`
+///   - `valkeys://:password@example.com:6380/0`
+///   - `valkey://user:pass@localhost:6379/1`
+///   - `redis://localhost:6379` (Redis-compatible alias)
 ///
 /// * `extra_options_json`: Optional null-terminated C string containing additional connection options as JSON.
 ///   Can be null if no extra options are needed. Supported options include:
@@ -893,6 +895,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///   - `connection_timeout`: Connection timeout in milliseconds (u32)
 ///   - `client_name`: Client name string (string)
 ///   - `cluster_mode_enabled`: Boolean for cluster mode (bool)
+///   - `refresh_topology_from_initial_nodes`: When cluster mode is enabled, refresh topology using only the initial seed nodes (bool)
 ///   - `protocol`: Protocol version - "RESP2" or "RESP3" (string)
 ///   - `read_from`: Read routing - "Primary", "PreferReplica", "LowestLatency", "AZAffinity", or "AZAffinityReplicasAndPrimary" (string)
 ///   - `connection_retry_strategy`: Retry configuration with `number_of_retries`, `factor`, `exponent_base`, and optional `jitter_percent` (object)
@@ -906,6 +909,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///   - `lib_name`: Library name identifier (string)
 ///   - `tcp_nodelay`: Enable TCP_NODELAY option (bool)
 ///   - `lazy_connect`: Delay connection until first command (bool)
+///   - `read_only`: Standalone read-only client mode (bool)
 ///   - `pubsub_reconciliation_interval_ms`: Interval for pub/sub reconnection checks in milliseconds (u32)
 ///   - `compression_config`: Compression settings with `enabled` (bool), `backend` ("ZSTD" or "LZ4"), optional `compression_level` (i32), and `min_compression_size` (u32) (object)
 ///   - `periodic_checks`: Health check configuration with either `manual_interval` (object with `duration_in_sec`) or `disabled` (bool) (object)
@@ -924,11 +928,11 @@ pub unsafe extern "C-unwind" fn create_client(
 ///
 /// ```c
 /// // Simple URI
-/// create_client_from_uri("redis://localhost:6379", NULL, &client_type, 0);
+/// create_client_from_uri("valkey://localhost:6379", NULL, &client_type, 0);
 ///
 /// // URI with basic options
 /// const char* basic_opts = "{\"request_timeout\": 5000, \"client_name\": \"myapp\"}";
-/// create_client_from_uri("redis://localhost:6379", basic_opts, &client_type, 0);
+/// create_client_from_uri("valkey://localhost:6379", basic_opts, &client_type, 0);
 ///
 /// // URI with advanced options
 /// const char* advanced_opts = "{"
@@ -942,7 +946,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///     "},"
 ///     "\"client_az\": \"us-west-2a\""
 /// "}";
-/// create_client_from_uri("redis://localhost:6379", advanced_opts, &client_type, 0);
+/// create_client_from_uri("valkey://localhost:6379", advanced_opts, &client_type, 0);
 ///
 /// // TLS with custom CA certificates
 /// const char* tls_opts = "{"
@@ -950,7 +954,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///     "\"client_cert\": \"-----BEGIN CERTIFICATE-----\\n...\","
 ///     "\"client_key\": \"-----BEGIN PRIVATE KEY-----\\n...\""
 /// "}";
-/// create_client_from_uri("rediss://secure.example.com:6380", tls_opts, &client_type, 0);
+/// create_client_from_uri("valkeys://secure.example.com:6380", tls_opts, &client_type, 0);
 ///
 /// // Compression and periodic checks
 /// const char* compression_opts = "{"
@@ -964,7 +968,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///         "\"manual_interval\": {\"duration_in_sec\": 30}"
 ///     "}"
 /// "}";
-/// create_client_from_uri("redis://localhost:6379", compression_opts, &client_type, 0);
+/// create_client_from_uri("valkey://localhost:6379", compression_opts, &client_type, 0);
 ///
 /// // AWS IAM authentication
 /// const char* iam_opts = "{"
@@ -975,7 +979,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///         "\"refresh_interval_seconds\": 900"
 ///     "}"
 /// "}";
-/// create_client_from_uri("redis://my-cluster.aws.com:6379", iam_opts, &client_type, 0);
+/// create_client_from_uri("valkey://my-cluster.aws.com:6379", iam_opts, &client_type, 0);
 ///
 /// // Pre-subscribe to pub/sub channels
 /// const char* pubsub_opts = "{"
@@ -985,7 +989,7 @@ pub unsafe extern "C-unwind" fn create_client(
 ///         "\"2\": [\"shard-channel\"]"      // Sharded
 ///     "}"
 /// "}";
-/// create_client_from_uri("redis://localhost:6379", pubsub_opts, &client_type, 0);
+/// create_client_from_uri("valkey://localhost:6379", pubsub_opts, &client_type, 0);
 /// ```
 ///
 /// # Safety
@@ -1052,13 +1056,31 @@ pub unsafe extern "C-unwind" fn create_client_from_uri(
     Box::into_raw(Box::new(response))
 }
 
+/// Normalizes Valkey URI schemes to their Redis equivalents understood by `parse_redis_url`.
+/// `valkey://` → `redis://`, `valkeys://` → `rediss://`, `valkey+unix://` → `redis+unix://`
+fn normalize_uri_scheme(input: &str) -> Cow<'_, str> {
+    let lower = input.to_ascii_lowercase();
+    if lower.starts_with("valkeys://") {
+        Cow::Owned(format!("rediss://{}", &input["valkeys://".len()..]))
+    } else if lower.starts_with("valkey+unix://") {
+        Cow::Owned(format!("redis+unix://{}", &input["valkey+unix://".len()..]))
+    } else if lower.starts_with("valkey://") {
+        Cow::Owned(format!("redis://{}", &input["valkey://".len()..]))
+    } else {
+        Cow::Borrowed(input)
+    }
+}
+
+/// Parses a Valkey- or Redis-style connection URI for use with GLIDE.
+fn parse_connection_url(input: &str) -> Option<url::Url> {
+    redis::parse_redis_url(normalize_uri_scheme(input).as_ref())
+}
+
 /// Internal function to parse URI and JSON options into a ConnectionRequest protobuf message.
 fn create_client_from_uri_internal(
     uri_str: *const c_char,
     extra_options_json: *const c_char,
 ) -> Result<connection_request::ConnectionRequest, String> {
-    use redis::parse_redis_url;
-
     // Parse URI string
     let uri_string = unsafe {
         CStr::from_ptr(uri_str)
@@ -1066,8 +1088,8 @@ fn create_client_from_uri_internal(
             .map_err(|e| format!("Invalid UTF-8 in URI: {}", e))?
     };
 
-    let url =
-        parse_redis_url(uri_string).ok_or_else(|| format!("Invalid Redis URI: {}", uri_string))?;
+    let url = parse_connection_url(uri_string)
+        .ok_or_else(|| format!("Invalid connection URI: {}", uri_string))?;
 
     // Build base ConnectionRequest from URI
     let mut request = connection_request::ConnectionRequest::new();
@@ -1108,7 +1130,7 @@ fn create_client_from_uri_internal(
         request.database_id = db_id;
     }
 
-    // Set TLS mode based on scheme
+    // Set TLS mode based on scheme (valkeys:// is normalized to rediss:// before parsing)
     let tls_mode = if url.scheme() == "rediss" {
         connection_request::TlsMode::SecureTls
     } else {
@@ -1178,6 +1200,14 @@ fn apply_json_options(
             .as_bool()
             .ok_or_else(|| "cluster_mode_enabled must be a boolean".to_string())?;
         request.cluster_mode_enabled = enabled;
+    }
+
+    // Handle refresh_topology_from_initial_nodes
+    if let Some(refresh) = obj.get("refresh_topology_from_initial_nodes") {
+        let enabled = refresh
+            .as_bool()
+            .ok_or_else(|| "refresh_topology_from_initial_nodes must be a boolean".to_string())?;
+        request.refresh_topology_from_initial_nodes = enabled;
     }
 
     // Handle protocol version
@@ -1344,6 +1374,14 @@ fn apply_json_options(
             .as_bool()
             .ok_or_else(|| "lazy_connect must be a boolean".to_string())?;
         request.lazy_connect = enabled;
+    }
+
+    // Handle read_only
+    if let Some(read_only) = obj.get("read_only") {
+        let enabled = read_only
+            .as_bool()
+            .ok_or_else(|| "read_only must be a boolean".to_string())?;
+        request.read_only = Some(enabled);
     }
 
     // Handle pubsub_reconciliation_interval_ms
