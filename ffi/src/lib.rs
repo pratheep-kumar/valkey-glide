@@ -1154,6 +1154,54 @@ fn create_client_from_uri_internal(
     Ok(request)
 }
 
+fn is_known_connection_options_json_key(key: &str) -> bool {
+    matches!(
+        key,
+        "request_timeout"
+            | "connection_timeout"
+            | "client_name"
+            | "cluster_mode_enabled"
+            | "refresh_topology_from_initial_nodes"
+            | "protocol"
+            | "read_from"
+            | "connection_retry_strategy"
+            | "root_certs"
+            | "client_az"
+            | "database_id"
+            | "inflight_requests_limit"
+            | "tls_mode"
+            | "client_cert"
+            | "client_key"
+            | "lib_name"
+            | "tcp_nodelay"
+            | "lazy_connect"
+            | "read_only"
+            | "pubsub_reconciliation_interval_ms"
+            | "compression_config"
+            | "periodic_checks"
+            | "iam_credentials"
+            | "pubsub_subscriptions"
+    )
+}
+
+fn validate_connection_options_json_keys(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let mut unknown: Vec<&str> = obj
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !is_known_connection_options_json_key(k))
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    unknown.sort_unstable();
+    Err(format!(
+        "Unknown key(s) in connection options JSON: {}",
+        unknown.join(", ")
+    ))
+}
+
 /// Apply additional connection options from JSON to the ConnectionRequest
 fn apply_json_options(
     request: &mut connection_request::ConnectionRequest,
@@ -1167,6 +1215,7 @@ fn apply_json_options(
     }
 
     let obj = json_value.as_object().unwrap();
+    validate_connection_options_json_keys(obj)?;
 
     // Handle request_timeout
     if let Some(timeout) = obj.get("request_timeout") {
@@ -1518,7 +1567,7 @@ fn apply_json_options(
         request.authentication_info = ::protobuf::MessageField::some(auth_info);
     }
 
-    // Handle pubsub_subscriptionsx
+    // Handle pubsub_subscriptions
     if let Some(pubsub) = obj.get("pubsub_subscriptions") {
         let pubsub_obj = pubsub
             .as_object()

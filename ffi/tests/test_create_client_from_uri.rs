@@ -570,6 +570,46 @@ fn test_create_client_from_uri_invalid_json() {
 }
 
 #[test]
+fn test_create_client_from_uri_unknown_json_keys() {
+    let server = Server::new();
+    let uri = CString::new(format!("redis://127.0.0.1:{}", server.port)).unwrap();
+    let options = CString::new(
+        r#"{"requst_timeout": 5000, "clint_name": "myapp"}"#,
+    )
+    .unwrap();
+
+    let client_type = Box::into_raw(Box::new(ClientType::SyncClient));
+
+    let response = unsafe {
+        create_client_from_uri(
+            uri.as_ptr(),
+            options.as_ptr(),
+            client_type,
+            null_pubsub_callback(),
+        )
+    };
+
+    assert!(!response.is_null());
+    let conn_response = unsafe { &*response };
+
+    assert!(!conn_response.connection_error_message.is_null());
+    assert!(conn_response.conn_ptr.is_null());
+
+    let error = parse_error_msg(conn_response.connection_error_message);
+    assert!(
+        error.contains("Unknown key(s) in connection options JSON"),
+        "expected unknown-key error, got: {error}"
+    );
+    assert!(error.contains("requst_timeout"));
+    assert!(error.contains("clint_name"));
+
+    unsafe {
+        free_connection_response(response as *mut ConnectionResponse);
+        drop(Box::from_raw(client_type));
+    }
+}
+
+#[test]
 fn test_create_client_from_uri_invalid_protocol() {
     let server = Server::new();
     let uri = CString::new(format!("redis://127.0.0.1:{}", server.port)).unwrap();
