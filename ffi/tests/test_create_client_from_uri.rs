@@ -573,10 +573,7 @@ fn test_create_client_from_uri_invalid_json() {
 fn test_create_client_from_uri_unknown_json_keys() {
     let server = Server::new();
     let uri = CString::new(format!("redis://127.0.0.1:{}", server.port)).unwrap();
-    let options = CString::new(
-        r#"{"requst_timeout": 5000, "clint_name": "myapp"}"#,
-    )
-    .unwrap();
+    let options = CString::new(r#"{"requst_timeout": 5000, "clint_name": "myapp"}"#).unwrap();
 
     let client_type = Box::into_raw(Box::new(ClientType::SyncClient));
 
